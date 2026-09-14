@@ -8,8 +8,6 @@ policy engine, no process state and no framework dependency.
 
 ## Installation
 
-Not published on Hex yet. When it is:
-
 ```elixir
 def deps do
   [{:ruxsat, "~> 0.1.0"}]
