@@ -5,7 +5,7 @@ defmodule Ruxsat do
       defmodule MyApp.Authorization do
         use Ruxsat
 
-        allow :read, Post
+        allow :read, Post, where: [published: true]
         allow :create, Post, role: :editor
         allow :update, Post, owner: true
         allow :publish, Post, if: &__MODULE__.can_publish?/2
@@ -22,6 +22,8 @@ defmodule Ruxsat do
       `Ruxsat.ForbiddenError`.
     * `explain(subject, action, resource)` - tells you why access was allowed
       or denied. Use it for debugging.
+    * `filter(subject, action, resource_type)` - describes which records the
+      subject may access, as plain data: `:all`, `:none` or `{:any, sets}`.
     * `rules()` - returns all rules in declaration order.
 
   ## Semantics
@@ -42,7 +44,7 @@ defmodule Ruxsat do
 
   alias Ruxsat.Rule
 
-  @options [:role, :owner, :if]
+  @options [:role, :owner, :where, :if]
 
   @doc false
   defmacro __using__(_opts) do
@@ -66,12 +68,15 @@ defmodule Ruxsat do
       of them. If `subject.role` is a list, any overlap passes.
     * `:owner` - `true` or a field name. Passes when `resource.<field>` equals
       `subject.id`. `true` means `:user_id`. A `nil` id never passes.
+    * `:where` - a keyword list of fields and literal values (atoms, booleans,
+      numbers, strings). Passes when every field equals its value.
     * `:if` - a function `(subject, resource) -> boolean`. It can be a remote
       capture, a local capture or an anonymous `fn`.
 
   ## Examples
 
       allow :read, Post
+      allow :read, Post, where: [published: true]
       allow :update, Post, role: [:admin, :editor]
       allow :update, Comment, owner: :author_id
       allow :publish, Post, role: :editor, if: &published_allowed?/2
@@ -86,7 +91,8 @@ defmodule Ruxsat do
       action: validate_action!(action, env),
       resource: validate_resource!(resource, env),
       role: validate_role!(Keyword.fetch(opts, :role), env),
-      owner: validate_owner!(Keyword.fetch(opts, :owner), env)
+      owner: validate_owner!(Keyword.fetch(opts, :owner), env),
+      where: validate_where!(Keyword.fetch(opts, :where), env)
     }
 
     condition = validate_condition!(Keyword.fetch(opts, :if), env)
@@ -151,6 +157,17 @@ defmodule Ruxsat do
         Ruxsat.__explain__(rules_for(action, resource), subject, resource)
       end
 
+      @doc """
+      Describes which records of `resource_type` `subject` may access with `action`.
+
+      Returns `:all`, `:none` or `{:any, sets}`. A record matches when all fields
+      in at least one set match. Raises if a rule for this action uses `:if`.
+      """
+      @spec filter(term, atom, atom) :: :all | :none | {:any, [keyword]}
+      def filter(subject, action, resource_type) do
+        Ruxsat.__filter__(rules_for(action, resource_type), subject)
+      end
+
       defp rules_for(action, resource) do
         __ruxsat_rules__(action, Ruxsat.__resource_type__(resource))
       end
@@ -190,6 +207,27 @@ defmodule Ruxsat do
     end)
   end
 
+  @doc false
+  def __filter__(rules, subject) do
+    # Every rule goes through Rule.filter/2, so a rule with :if raises for
+    # any subject, not only for subjects whose role matches.
+    sets =
+      rules
+      |> Enum.flat_map(fn rule ->
+        case Rule.filter(rule, subject) do
+          {:ok, set} -> [set]
+          :skip -> []
+        end
+      end)
+      |> Enum.uniq()
+
+    cond do
+      sets == [] -> :none
+      [] in sets -> :all
+      true -> {:any, sets}
+    end
+  end
+
   ## Compile-time validation
 
   defguardp is_name(term) when is_atom(term) and term not in [nil, true, false]
@@ -224,12 +262,14 @@ defmodule Ruxsat do
       compile_error!(env, "unknown option #{inspect(key)}, expected one of: #{inspect(@options)}")
     end
 
-    if length(opts) != length(Keyword.keys(opts) |> Enum.uniq()) do
+    if duplicate_keys?(opts) do
       compile_error!(env, "duplicate options in: #{Macro.to_string(opts)}")
     end
 
     opts
   end
+
+  defp duplicate_keys?(keyword), do: length(keyword) != length(Enum.uniq(Keyword.keys(keyword)))
 
   defp validate_role!(:error, _env), do: nil
   defp validate_role!({:ok, role}, _env) when is_name(role), do: [role]
@@ -255,6 +295,35 @@ defmodule Ruxsat do
     compile_error!(
       env,
       "expected :owner to be true or a field name, got: #{Macro.to_string(owner)}"
+    )
+  end
+
+  defp validate_where!(:error, _env), do: nil
+
+  defp validate_where!({:ok, [_ | _] = fields}, env) do
+    unless Keyword.keyword?(fields) and
+             Enum.all?(fields, fn {_field, value} -> literal?(value) end) do
+      invalid_where!(fields, env)
+    end
+
+    if duplicate_keys?(fields) do
+      compile_error!(env, "duplicate fields in :where: #{Macro.to_string(fields)}")
+    end
+
+    fields
+  end
+
+  defp validate_where!({:ok, where}, env), do: invalid_where!(where, env)
+
+  # nil is excluded on purpose: `field = NULL` in SQL does not behave like `==`.
+  defp literal?(value),
+    do: (is_atom(value) and not is_nil(value)) or is_number(value) or is_binary(value)
+
+  defp invalid_where!(where, env) do
+    compile_error!(
+      env,
+      "expected :where to be a non-empty keyword list of fields and literal values " <>
+        "(atoms, booleans, numbers or strings), got: #{Macro.to_string(where)}"
     )
   end
 

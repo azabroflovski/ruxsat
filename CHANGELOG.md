@@ -9,6 +9,16 @@ Before 1.0, minor versions may contain breaking changes, and they are marked
 
 ## [Unreleased]
 
+### Added
+
+- `where:` rule option. It checks that resource fields equal literal values,
+  e.g. `allow :read, Post, where: [published: true]`. `explain/3` reports a
+  failed check as `:where_mismatch`.
+- Generated `filter/3`. It describes which records a subject may access, as
+  `:all`, `:none` or `{:any, sets}`. The result is plain data with no Ecto
+  dependency, and the README includes a recipe for Ecto queries. Rules that use
+  `if:` cannot be turned into data, so `filter/3` raises for them.
+
 ## [0.1.0] - 2026-09-14
 
 ### Added
