@@ -139,6 +139,12 @@ database, string role coercion, configurable role or id fields, and
   change this file in the same commit.
 - Prefer a clear `CompileError` over a runtime surprise.
 - Keep `lib/` small. If a change grows it significantly, stop and reconsider.
+- Any user-visible change to the public API, semantics or error messages gets
+  an entry under `## [Unreleased]` in `CHANGELOG.md`. Write it for users, not
+  as a list of commits. Mark breaking changes with **Breaking** and say how to
+  migrate. Internal refactoring and test-only changes do not need an entry.
+- To release: move `Unreleased` to a new version section with a date, bump
+  `@version` in `mix.exs`, commit, tag `vX.Y.Z`, push, then `mix hex.publish`.
 
 ## Commands
 
