@@ -26,7 +26,7 @@ default, nil-safe ownership, compile-time validation of rules and `explain/3`.
 
 ```elixir
 def deps do
-  [{:ruxsat, "~> 0.1.0"}]
+  [{:ruxsat, "~> 0.2.0"}]
 end
 ```
 
